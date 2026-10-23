@@ -34,3 +34,118 @@ jobs:
           name: experimental-app-build
           path: upstream/app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
+
+  manager:
+    name: Build KernelSU Next 3.4.2 manager
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      KSU_COMMIT: 4c706b5938665866ebe16944a481a7b91e3396af
+      KSU_SAMSUNG_KERNEL_COMMIT: b62019e7ac452d73f3198e0f4cc60963d18d3283
+      KSU_SAMSUNG_USERSPACE_COMMIT: 00a165704e9330bca4db6838e63555153edbe01a
+    steps:
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.1.0
+      - name: Fetch exact KernelSU Next source
+        run: |
+          set -euo pipefail
+          git clone https://github.com/KernelSU-Next/KernelSU-Next.git ksunext
+          git -C ksunext checkout --detach "$KSU_COMMIT"
+          git -C ksunext config user.name "Root My Galaxy CI"
+          git -C ksunext config user.email "ci@rootmygalaxy.invalid"
+          git -C ksunext fetch --no-tags origin "$KSU_SAMSUNG_KERNEL_COMMIT" "$KSU_SAMSUNG_USERSPACE_COMMIT"
+          set +e
+          git -C ksunext cherry-pick "$KSU_SAMSUNG_KERNEL_COMMIT"
+          kernel_pick_rc=$?
+          set -e
+          if [[ "$kernel_pick_rc" -ne 0 ]]; then
+            python3 - ksunext <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+
+          init_path = root / "kernel/core/init.c"
+          init = init_path.read_text()
+          start = init.index("<<<<<<< HEAD")
+          separator = init.index("\n=======\n", start)
+          end = init.index("\n>>>>>>>", separator)
+          end_line = init.index("\n", end + 1)
+          head_block = init[start + len("<<<<<<< HEAD\n"):separator]
+          if "#ifdef KSU_MANAGER_PACKAGE" not in head_block:
+              raise SystemExit("unexpected init.c conflict layout")
+          init_path.write_text(init[:start] + "\tint ret;\n\n" + head_block + "\n" + init[end_line + 1:])
+
+          manager_path = root / "kernel/hook/syscall_hook_manager.c"
+          manager = manager_path.read_text()
+          start = manager.index("<<<<<<< HEAD")
+          separator = manager.index("\n=======\n", start)
+          end = manager.index("\n>>>>>>>", separator)
+          end_line = manager.index("\n", end + 1)
+          head_block = manager[start + len("<<<<<<< HEAD\n"):separator]
+          pr_block = manager[separator + len("\n=======\n"):end]
+          if '#include "hook/riscv64/syscall_regs.h"' not in head_block:
+              raise SystemExit("unexpected syscall_hook_manager.c current layout")
+          if '#include "compat/samsung_rkp.h"' not in pr_block:
+              raise SystemExit("unexpected syscall_hook_manager.c PR layout")
+          manager_path.write_text(manager[:start] + head_block + "\n" + pr_block + manager[end_line + 1:])
+          PY
+            git -C ksunext add kernel/core/init.c kernel/hook/syscall_hook_manager.c
+            GIT_EDITOR=true git -C ksunext cherry-pick --continue
+          fi
+          git -C ksunext cherry-pick "$KSU_SAMSUNG_USERSPACE_COMMIT"
+          if grep -R -n -E '^(<<<<<<<|=======|>>>>>>>)' ksunext/kernel/core/init.c ksunext/kernel/hook/syscall_hook_manager.c; then
+            echo "unresolved Samsung compatibility conflicts"
+            exit 1
+          fi
+          grep -Fxq 'fix: stage ksud before switching to late-loaded context' < <(git -C ksunext log --format='%s' -2)
+          grep -Fxq 'feat: add Samsung KDP/RKP/DEFEX late-load compatibility' < <(git -C ksunext log --format='%s' -2)
+      - name: Pin manager version to daemon lineage
+        working-directory: ksunext/manager
+        run: |
+          set -euo pipefail
+          python3 - build.gradle.kts <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          old = """fun getVersionName(): String {
+              return getGitDescribe()
+          }"""
+          new = """fun getVersionName(): String {
+              return "3.4.2"
+          }"""
+          if source.count(old) != 1:
+              raise SystemExit("unexpected manager version function")
+          path.write_text(source.replace(old, new, 1))
+          PY
+          version_code="$((30000 + $(git -C .. rev-list --count HEAD)))"
+          echo "MANAGER_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
+          echo "MANAGER_VERSION_NAME=3.4.2" >> "$GITHUB_ENV"
+          echo "Manager version: 3.4.2 ($version_code)"
+      - name: Build manager APK
+        working-directory: ksunext/manager
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace
+          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | head -1)"
+          test -n "$apk"
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp "$apk" "$GITHUB_WORKSPACE/dist/KernelSU_Next_3.4.2_manager.apk"
+          sha256sum "$GITHUB_WORKSPACE/dist/KernelSU_Next_3.4.2_manager.apk" > "$GITHUB_WORKSPACE/dist/SHA256SUM"
+          echo "KernelSU Next manager source commit: $KSU_COMMIT" > "$GITHUB_WORKSPACE/dist/BUILD-REPORT.txt"
+          echo "Samsung kernel compatibility commit: $KSU_SAMSUNG_KERNEL_COMMIT" >> "$GITHUB_WORKSPACE/dist/BUILD-REPORT.txt"
+          echo "Samsung userspace compatibility commit: $KSU_SAMSUNG_USERSPACE_COMMIT" >> "$GITHUB_WORKSPACE/dist/BUILD-REPORT.txt"
+          echo "Manager version: $MANAGER_VERSION_NAME ($MANAGER_VERSION_CODE)" >> "$GITHUB_WORKSPACE/dist/BUILD-REPORT.txt"
+          "$ANDROID_HOME/build-tools/36.1.0/aapt" dump badging "$GITHUB_WORKSPACE/dist/KernelSU_Next_3.4.2_manager.apk" | grep -Fq "versionName='3.4.2'"
+          "$ANDROID_HOME/build-tools/36.1.0/aapt" dump badging "$GITHUB_WORKSPACE/dist/KernelSU_Next_3.4.2_manager.apk" | grep -Fq "versionCode='$MANAGER_VERSION_CODE'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernelsu-next-342-manager
+          path: dist/
