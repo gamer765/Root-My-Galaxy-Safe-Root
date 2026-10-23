@@ -28,7 +28,7 @@ jobs:
           mkdir -p "$helper_dir"
           curl --fail --location --retry 3 \
             --output "$RUNNER_TEMP/su_daemon.c" \
-            "https://raw.githubusercontent.com/gamer765/Root-My-Galaxy-Payloads/16ff3288e1c1c156d9e9473b6348e3b7533f7ddc/src/su_daemon.c"
+            "https://raw.githubusercontent.com/gamer765/Root-My-Galaxy-Payloads/07abc7d8d2da5b7ce97e15a0449ecd118411d086/src/su_daemon.c"
           ndk="$ANDROID_HOME/ndk/28.2.13676358"
           clang="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
           test -x "$clang"
