@@ -3,8 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       source_zip_url:
-        description: 'HTTPS URL of the exact reviewed KernelSU-Next-safe-root-source.zip (GitHub release asset or other trusted source)'
-        required: true
+        description: 'Optional HTTPS override for the reviewed source archive'
+        required: false
+        default: 'https://github.com/gamer765/Root-My-Galaxy-Safe-Root/releases/download/safe-root-dev-1/KernelSU-Next-safe-root-source.zip'
         type: string
 jobs:
   verify:
@@ -36,6 +37,20 @@ jobs:
           print('Safe Root source checks passed')
           PY
       - uses: dtolnay/rust-toolchain@stable
-      - name: Check daemon Rust sources (host diagnostic, not Android release)
+      - name: Prepare Android cross compiler
+        run: |
+          rustup target add aarch64-linux-android
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" >> "$GITHUB_ENV"
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+      - name: Build ARM64 Android daemon (experimental)
         working-directory: source/KernelSU-Next-samsung-lateload-sync/userspace/ksud
-        run: cargo check --locked
+        env:
+          LIBCLANG_PATH: /usr/lib/llvm-14/lib
+        run: cargo build --release --target aarch64-linux-android --locked
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ksud-safe-root-arm64-experimental
+          path: source/KernelSU-Next-samsung-lateload-sync/userspace/ksud/target/aarch64-linux-android/release/ksud
+          if-no-files-found: error
