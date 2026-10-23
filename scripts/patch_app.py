@@ -22,7 +22,7 @@ edit("app/src/main/java/dev/busung/s25uroot/InstallViewModel.kt", [
  ("fun install(profileId: String? = null)", "fun install(profileId: String? = null, safeRoot: Boolean = false)"),
  ("installKernelSu(payloads)", "installKernelSu(payloads, safeRoot)"),
  ("private suspend fun installKernelSu(payloads: VerifiedPayloads)", "private suspend fun installKernelSu(payloads: VerifiedPayloads, safeRoot: Boolean)"),
- ('val lateLoad = runHelper("--late-load")', 'val lateLoad = if (safeRoot) runHelper("--late-load", "--safe-mode") else runHelper("--late-load")'),
+ ('val lateLoad = runHelper("--late-load")', 'val lateLoad = if (safeRoot) runHelper("--late-load --safe-mode") else runHelper("--late-load")'),
 ])
 edit("app/src/main/java/dev/busung/s25uroot/MainActivity.kt", [
  ('openInstaller: (String?) -> Unit,', 'openInstaller: (String?, Boolean) -> Unit,'),
