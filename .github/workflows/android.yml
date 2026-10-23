@@ -17,6 +17,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Fetch upstream app
         run: git clone --depth 1 https://github.com/BuSung-dev/Root-My-Galaxy.git upstream
       - name: Apply Safe Root integration
