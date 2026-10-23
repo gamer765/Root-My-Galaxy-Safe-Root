@@ -1,0 +1,41 @@
+name: KernelSU Safe Root source verification
+on:
+  workflow_dispatch:
+    inputs:
+      source_zip_url:
+        description: 'HTTPS URL of the exact reviewed KernelSU-Next-safe-root-source.zip (GitHub release asset or other trusted source)'
+        required: true
+        type: string
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download supplied source (never substitute upstream)
+        env:
+          SOURCE_URL: ${{ inputs.source_zip_url }}
+        run: |
+          case "$SOURCE_URL" in https://*) ;; *) echo 'Only HTTPS source URLs accepted' >&2; exit 1;; esac
+          curl --fail --location --retry 2 --output source.zip "$SOURCE_URL"
+          unzip -q source.zip -d source
+      - name: Validate Safe Root implementation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          roots = list(Path('source').glob('*/userspace/ksud/src'))
+          assert len(roots) == 1, 'Expected exactly one KernelSU source tree'
+          root = roots[0]
+          cli = (root / 'cli.rs').read_text()
+          late = (root / 'late_load.rs').read_text()
+          assert 'safe_mode: bool' in cli
+          assert 'safe_mode,' in cli
+          assert 'if !safe_mode {' in late
+          assert 'SAFE ROOT:' in late
+          print('Safe Root source checks passed')
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check daemon Rust sources (host diagnostic, not Android release)
+        working-directory: source/KernelSU-Next-samsung-lateload-sync/userspace/ksud
+        run: cargo check --locked
